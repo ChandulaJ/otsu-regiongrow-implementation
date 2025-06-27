@@ -1,21 +1,19 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
-import math
-from PIL import Image
 
 img=cv2.imread("image.jpg",0)
-
 print(img.shape)
 
-gauss_noise=np.zeros((500,500),dtype=np.uint8)
+# Adding noise to the image
+
+gauss_noise=np.zeros((1500,1500),dtype=np.uint8)
 cv2.randn(gauss_noise,128,20)
 gauss_noise=(gauss_noise*0.5).astype(np.uint8)
 
 gn_img=cv2.add(img,gauss_noise)
 
-fig=plt.figure(dpi=200)
-
+fig=plt.figure(dpi=300)
 fig.add_subplot(1,3,1)
 plt.imshow(img,cmap='gray')
 plt.axis("off")
@@ -36,116 +34,118 @@ cv2.imwrite('gn_img.jpg', gn_img, [int(cv2.IMWRITE_JPEG_QUALITY), 100])
 
 # Otsu's method
 
-threshold_values = {}
-h = [1]
-
-
-def Hist(img):
-   row, col = img.shape 
-   y = np.zeros(500)
-   for i in range(0,row):
-      for j in range(0,col):
-         y[img[i,j]] += 1
-   x = np.arange(0,500)
-   plt.bar(x, y, color='b', width=5, align='center', alpha=0.25)
-   plt.show()
-   return y
-
-
-def regenerate_img(img, threshold):
-    row, col = img.shape 
-    y = np.zeros((row, col))
-    for i in range(0,row):
-        for j in range(0,col):
-            if img[i,j] >= threshold:
-                y[i,j] = 255
-            else:
-                y[i,j] = 0
-    return y
-
-
-   
-def countPixel(h):
-    cnt = 0
-    for i in range(0, len(h)):
-        if h[i]>0:
-           cnt += h[i]
-    return cnt
-
-
-def weight(s, e):
-    w = 0
-    for i in range(s, e):
-        w += h[i]
-    return w
-
-
-def mean(s, e):
-    m = 0
-    w = weight(s, e)
-    for i in range(s, e):
-        m += h[i] * i
+def otsu_threshold(image):
+    """
+    Implement Otsu's thresholding algorithm from scratch
+    """
+    # Calculate histogram
+    hist, bins = np.histogram(image.flatten(), 256, [0, 256])
+    hist = hist.astype(float)
     
-    return m/float(w)
-
-
-def variance(s, e):
-    v = 0
-    m = mean(s, e)
-    w = weight(s, e)
-    for i in range(s, e):
-        v += ((i - m) **2) * h[i]
-    v /= w
-    return v
+    # Total number of pixels
+    total_pixels = image.size
+    
+    # Calculate probabilities for each intensity level
+    prob = hist / total_pixels
+    
+    # Calculate cumulative sums
+    cum_sum = np.cumsum(prob)
+    cum_mean = np.cumsum(prob * np.arange(256))
+    
+    # Global mean
+    global_mean = cum_mean[-1]
+    
+    # Initialize variables
+    max_variance = 0
+    optimal_threshold = 0
+    
+    # Try all possible thresholds (0 to 255)
+    for t in range(256):
+        # Weight of background class
+        w0 = cum_sum[t]
+        # Weight of foreground class
+        w1 = 1 - w0
+        
+        # Skip if one of the classes is empty
+        if w0 == 0 or w1 == 0:
+            continue
             
-
-def threshold(h):
-    cnt = countPixel(h)
-    for i in range(1, len(h)):
-        vb = variance(0, i)
-        wb = weight(0, i) / float(cnt)
-        mb = mean(0, i)
+        # Mean of background class
+        mu0 = cum_mean[t] / w0 if w0 > 0 else 0
+        # Mean of foreground class
+        mu1 = (global_mean - cum_mean[t]) / w1 if w1 > 0 else 0
         
-        vf = variance(i, len(h))
-        wf = weight(i, len(h)) / float(cnt)
-        mf = mean(i, len(h))
+        # Between-class variance
+        between_class_variance = w0 * w1 * (mu0 - mu1) ** 2
         
-        V2w = wb * (vb) + wf * (vf)
-        V2b = wb * wf * (mb - mf)**2
-        
-        fw = open("trace.txt", "a")
-        fw.write('T='+ str(i) + "\n")
+        # Check if this is the maximum variance so far
+        if between_class_variance > max_variance:
+            max_variance = between_class_variance
+            optimal_threshold = t
+    
+    return optimal_threshold, max_variance
 
-        fw.write('Wb='+ str(wb) + "\n")
-        fw.write('Mb='+ str(mb) + "\n")
-        fw.write('Vb='+ str(vb) + "\n")
-        
-        fw.write('Wf='+ str(wf) + "\n")
-        fw.write('Mf='+ str(mf) + "\n")
-        fw.write('Vf='+ str(vf) + "\n")
+def apply_threshold(image, threshold):
+    """
+    Apply threshold to create binary image
+    """
+    binary_image = np.zeros_like(image)
+    binary_image[image >= threshold] = 255
+    return binary_image
 
-        fw.write('within class variance='+ str(V2w) + "\n")
-        fw.write('between class variance=' + str(V2b) + "\n")
-        fw.write("\n")
-        
-        if not math.isnan(V2w):
-            threshold_values[i] = V2w
+# Apply Otsu's algorithm to the noisy image
+print("Applying Otsu's thresholding algorithm...")
+optimal_thresh, max_var = otsu_threshold(gn_img)
+print(f"Optimal threshold found: {optimal_thresh}")
+print(f"Maximum between-class variance: {max_var:.6f}")
+
+# Create binary image using our threshold
+binary_result = apply_threshold(gn_img, optimal_thresh)
+
+# Display results
+fig2 = plt.figure(figsize=(12, 8), dpi=100)
+
+# Original noisy image
+fig2.add_subplot(2, 2, 1)
+plt.imshow(gn_img, cmap='gray')
+plt.axis("off")
+plt.title("Noisy Image")
+
+# Histogram of the noisy image with Otsu threshold
+fig2.add_subplot(2, 2, 2)
+hist_counts, bins, patches = plt.hist(gn_img.flatten(), 256, [0, 256], color='black', alpha=0.7)
+plt.axvline(x=optimal_thresh, color='red', linestyle='--', linewidth=3, label=f'Otsu Threshold: {optimal_thresh}')
+plt.xlabel('Pixel Intensity')
+plt.ylabel('Frequency')
+plt.title('Histogram with Otsu Threshold (Expanded View)')
+plt.legend()
+plt.grid(True, alpha=0.3)
+# Limit histogram display to frequency up to 250
 
 
-def get_optimal_threshold():
-    min_V2w = min(threshold_values.itervalues())
-    optimal_threshold = [k for k, v in threshold_values.iteritems() if v == min_V2w]
-    print ("optimal threshold", optimal_threshold[0])
-    return optimal_threshold[0]
 
+# Otsu thresholded result
+fig2.add_subplot(2, 2, 3)
+plt.imshow(binary_result, cmap='gray')
+plt.axis("off")
+plt.title(f"Otsu Thresholded (T={optimal_thresh})")
 
-image = Image.open('gn_img.jpg').convert("L")
-img = np.asarray(image)
+# Original image for comparison
+fig2.add_subplot(2, 2, 4)
+plt.imshow(img, cmap='gray')
+plt.axis("off")
+plt.title("Original (No Noise)")
 
-h = Hist(img)
-threshold(h)
-op_thres = get_optimal_threshold()
+plt.tight_layout()
+plt.show()
 
-res = regenerate_img(img, op_thres)
-plt.imshow(res)
-plt.savefig("otsu.jpg")
+# Calculate and display some statistics
+print("\n=== Image Statistics ===")
+print(f"Original image - Mean: {np.mean(img):.2f}, Std: {np.std(img):.2f}")
+print(f"Noisy image - Mean: {np.mean(gn_img):.2f}, Std: {np.std(gn_img):.2f}")
+print(f"Binary image - Foreground pixels: {np.sum(binary_result == 255)} ({np.sum(binary_result == 255)/binary_result.size*100:.1f}%)")
+print(f"Binary image - Background pixels: {np.sum(binary_result == 0)} ({np.sum(binary_result == 0)/binary_result.size*100:.1f}%)")
+
+# Save the result
+cv2.imwrite('otsu_result.jpg', binary_result)
+print(f"\nOtsu thresholding result saved as 'otsu_result.jpg'")
